@@ -23,30 +23,33 @@ Socket::Socket(Socket&& other) noexcept : fd_(other.fd_) {
 }
 
 Socket& Socket::operator=(Socket&& other) noexcept {
-    if (this != &other) {
-        if (fd_ >= 0) {
-            close(fd_);
-        }
-        fd_ = other.fd_;
-        other.fd_ = -1;
+    if (this == &other) {
+        return *this;
     }
+
+    if (fd_ >= 0) {
+        close(fd_);
+    }
+    fd_ = other.fd_;
+    other.fd_ = -1;
+
     return *this;
 }
 
-Result<SocketError> Socket::set_nonblocking() {
+bool Socket::set_nonblocking() {
     int flags = fcntl(fd_, F_GETFL, 0);
     if (flags == -1) {
-        return SocketError::SetNonBlockingFailed;
+        return false;
     }
     
     if (fcntl(fd_, F_SETFL, flags | O_NONBLOCK) == -1) {
-        return SocketError::SetNonBlockingFailed;
+        return false;
     }
     
-    return std::nullopt;
+    return true;
 }
 
-Result<TcpSocket> TcpSocket::create(int port) {
+std::optional<TcpSocket> TcpSocket::create(int port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == -1) {
         return std::nullopt;
@@ -78,11 +81,11 @@ Result<TcpSocket> TcpSocket::create(int port) {
     return tcp_sock;
 }
 
-Result<int> TcpSocket::accept_connection() {
+std::optional<int> TcpSocket::accept_connection() {
     sockaddr_in client_addr{};
     socklen_t client_len = sizeof(client_addr);
-    int client_fd = accept(fd_, (sockaddr*)&client_addr, &client_len);
-    
+
+    int client_fd = accept(fd_, reinterpret_cast<sockaddr*>(&client_addr), &client_len);
     if (client_fd == -1) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             return std::nullopt;
@@ -98,7 +101,7 @@ Result<int> TcpSocket::accept_connection() {
     return client_fd;
 }
 
-Result<UdpSocket> UdpSocket::create(int port) {
+std::optional<UdpSocket> UdpSocket::create(int port) {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock == -1) {
         return std::nullopt;

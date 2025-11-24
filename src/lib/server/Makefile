@@ -1,5 +1,4 @@
-# lib/server/Makefile - Server library build system
-# Builds libserver.a - Main server orchestration library
+# Server library build system
 
 INCLUDE_DIR := $(BUILD_DIR)/include
 LOCAL_INCLUDE_DIR := $(INCLUDE_DIR)/server
@@ -7,10 +6,8 @@ CXXFLAGS := $(CXX_FLAGS) -I$(INCLUDE_DIR)
 LOCAL_OBJS_DIR := $(OBJS_DIR)/lib/server
 LIB_TARGET := $(LIB_DIR)/libserver.a
 
-# Dependencies on other libraries
 DEP_LIBS := $(LIB_DIR)/libconfig.a $(LIB_DIR)/libsocket.a $(LIB_DIR)/libcommand.a
 
-# Source files
 SOURCES := server.cpp
 OBJECTS := $(SOURCES:%.cpp=$(LOCAL_OBJS_DIR)/%.o)
 HEADERS := server.hpp
@@ -28,7 +25,6 @@ $(LOCAL_OBJS_DIR)/%.o: %.cpp $(HEADERS) | $(LOCAL_OBJS_DIR)
 	@echo "Compiling server: $<"
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Copy headers to build/include
 $(LOCAL_INCLUDE_DIR)/%.hpp: %.hpp | $(LOCAL_INCLUDE_DIR)
 	@echo "Installing header: $<"
 	@cp $< $@

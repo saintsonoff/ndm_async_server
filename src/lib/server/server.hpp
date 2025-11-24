@@ -17,6 +17,19 @@
 namespace async_server {
 
 
+enum class FdType : uint8_t {
+    Signal,
+    TcpListener,
+    UdpSocket,
+    TcpClient
+};
+
+struct FdInfo {
+    int fd;
+    FdType type;
+};
+
+
 class Server {
 public:
     explicit Server(Config config);
@@ -25,30 +38,31 @@ public:
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
     
-    Result<void*> initialize();
-    void run();
-    void stop();
-    void add_signal_fd(int signal_fd);
+public:
+    bool Initialize();
+    void Run();
+    void Stop();
+    void AddSignalFd(int signal_fd);
     
 private:
-    void handle_tcp_accept();
-    void handle_tcp_client(int client_fd);
-    void handle_udp_message();
+    void handleTcpAccept();
+    void handleTcpClient(int client_fd);
+    void handleUdpMessage();
     
-    Config config_;
-    Statistics stats_;
-    std::atomic<bool> running_{true};
-    CommandProcessor processor_;
+    Config m_config;
+    Statistics m_stats;
+    std::atomic<bool> m_running{true};
+    CommandProcessor m_command_processor;
     
-    std::unique_ptr<TcpSocket> tcp_socket_;
-    std::unique_ptr<UdpSocket> udp_socket_;
+    std::unique_ptr<TcpSocket> m_tcp_socket;
+    std::unique_ptr<UdpSocket> m_udp_socket;
     
-    int epoll_fd_{-1};
-    int signal_fd_{-1};
-    std::unordered_map<int, bool> clients_;
+    int m_epoll_fd = -1;
+    int m_signal_fd = -1;
+    std::unordered_map<int, std::unique_ptr<FdInfo>> m_fd_info;
     
-    static constexpr int MAX_EVENTS = 64;
-    static constexpr int BUFFER_SIZE = 4096;
+    static constexpr int kMaxEventCount = 64;
+    static constexpr int kBufferSize = 4096;
 };
 
 

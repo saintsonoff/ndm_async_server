@@ -1,5 +1,4 @@
-# lib/command/Makefile - Command library build system
-# Builds libcommand.a - Command processing and statistics library
+# Command library build system
 
 INCLUDE_DIR := $(BUILD_DIR)/include
 LOCAL_INCLUDE_DIR := $(INCLUDE_DIR)/command
@@ -7,7 +6,6 @@ CXXFLAGS := $(CXX_FLAGS) -I$(INCLUDE_DIR)
 LOCAL_OBJS_DIR := $(OBJS_DIR)/lib/command
 LIB_TARGET := $(LIB_DIR)/libcommand.a
 
-# Source files
 SOURCES := command.cpp
 OBJECTS := $(SOURCES:%.cpp=$(LOCAL_OBJS_DIR)/%.o)
 HEADERS := command.hpp
@@ -25,7 +23,6 @@ $(LOCAL_OBJS_DIR)/%.o: %.cpp $(HEADERS) | $(LOCAL_OBJS_DIR)
 	@echo "Compiling command: $<"
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Copy headers to build/include
 $(LOCAL_INCLUDE_DIR)/%.hpp: %.hpp | $(LOCAL_INCLUDE_DIR)
 	@echo "Installing header: $<"
 	@cp $< $@

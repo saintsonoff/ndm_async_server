@@ -1,5 +1,4 @@
-# lib/socket/Makefile - Socket library build system
-# Builds libsocket.a - Socket abstraction library
+# Socket library build system
 
 INCLUDE_DIR := $(BUILD_DIR)/include
 LOCAL_INCLUDE_DIR := $(INCLUDE_DIR)/socket
@@ -7,7 +6,6 @@ CXXFLAGS := $(CXX_FLAGS) -I$(INCLUDE_DIR)
 LOCAL_OBJS_DIR := $(OBJS_DIR)/lib/socket
 LIB_TARGET := $(LIB_DIR)/libsocket.a
 
-# Source files
 SOURCES := socket.cpp
 OBJECTS := $(SOURCES:%.cpp=$(LOCAL_OBJS_DIR)/%.o)
 HEADERS := socket.hpp
@@ -25,7 +23,6 @@ $(LOCAL_OBJS_DIR)/%.o: %.cpp $(HEADERS) | $(LOCAL_OBJS_DIR)
 	@echo "Compiling socket: $<"
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Copy headers to build/include
 $(LOCAL_INCLUDE_DIR)/%.hpp: %.hpp | $(LOCAL_INCLUDE_DIR)
 	@echo "Installing header: $<"
 	@cp $< $@

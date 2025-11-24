@@ -1,7 +1,11 @@
 #include "server.hpp"
 
+// stlcpp
+#include <memory>
+
 // stlc
 #include <cerrno>
+#include <cstddef>
 #include <cstring>
 
 // unix
@@ -15,78 +19,90 @@ namespace async_server {
 
 
 Server::Server(Config config) 
-    : config_(std::move(config))
-    , processor_(stats_, running_) {
+    : m_config(std::move(config))
+    , m_command_processor(m_stats, m_running) {
 }
 
 Server::~Server() {
-    if (signal_fd_ >= 0) {
-        if (epoll_fd_ >= 0) {
-            epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, signal_fd_, nullptr);
+    if (m_signal_fd >= 0) {
+        if (m_epoll_fd >= 0) {
+            epoll_ctl(m_epoll_fd, EPOLL_CTL_DEL, m_signal_fd, nullptr);
         }
     }
     
-    if (epoll_fd_ >= 0) {
-        close(epoll_fd_);
+    if (m_epoll_fd >= 0) {
+        close(m_epoll_fd);
     }
     
-    for (auto& [fd, _] : clients_) {
-        close(fd);
+    for (auto& [fd, info] : m_fd_info) {
+        if (info->type == FdType::TcpClient) {
+            close(fd);
+        }
     }
 }
 
-Result<void*> Server::initialize() {
-    auto tcp_result = TcpSocket::create(config_.get_tcp_port());
+bool Server::Initialize() {
+    auto tcp_result = TcpSocket::create(m_config.GetTcpPort());
     if (!tcp_result) {
-        return std::nullopt;
+        return false;
     }
-    tcp_socket_ = std::make_unique<TcpSocket>(std::move(*tcp_result));
+    m_tcp_socket = std::make_unique<TcpSocket>(std::move(*tcp_result));
     
-    auto udp_result = UdpSocket::create(config_.get_udp_port());
+    auto udp_result = UdpSocket::create(m_config.GetUdpPort());
     if (!udp_result) {
-        return std::nullopt;
+        return false;
     }
-    udp_socket_ = std::make_unique<UdpSocket>(std::move(*udp_result));
+    m_udp_socket = std::make_unique<UdpSocket>(std::move(*udp_result));
     
-    epoll_fd_ = epoll_create1(0);
-    if (epoll_fd_ == -1) {
-        return std::nullopt;
+    m_epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+    if (m_epoll_fd == -1) {
+        return false;
     }
     
-    epoll_event ev{};
+    epoll_event ev;
     ev.events = EPOLLIN | EPOLLET;
-    ev.data.fd = tcp_socket_->fd();
     
-    if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, tcp_socket_->fd(), &ev) == -1) {
-        return std::nullopt;
+    auto tcp_info = std::make_unique<FdInfo>(FdInfo{m_tcp_socket->fd(), FdType::TcpListener});
+    ev.data.ptr = tcp_info.get();
+    
+    if (epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, m_tcp_socket->fd(), &ev) == -1) {
+        return false;
     }
+    m_fd_info[m_tcp_socket->fd()] = std::move(tcp_info);
     
-    ev.data.fd = udp_socket_->fd();
-    if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, udp_socket_->fd(), &ev) == -1) {
-        return std::nullopt;
+    auto udp_info = std::make_unique<FdInfo>(FdInfo{m_udp_socket->fd(), FdType::UdpSocket});
+    ev.data.ptr = udp_info.get();
+    
+    if (epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, m_udp_socket->fd(), &ev) == -1) {
+        return false;
     }
+    m_fd_info[m_udp_socket->fd()] = std::move(udp_info);
     
-    return nullptr;
+    return true;
 }
 
-void Server::add_signal_fd(int signal_fd) {
-    signal_fd_ = signal_fd;
+void Server::AddSignalFd(int signal_fd) {
+    m_signal_fd = signal_fd;
     
-    if (epoll_fd_ < 0 || signal_fd < 0) {
+    if (m_epoll_fd < 0 || signal_fd < 0) {
         return;
     }
     
     epoll_event ev{};
     ev.events = EPOLLIN;
-    ev.data.fd = signal_fd;
-    epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, signal_fd, &ev);
+    
+    auto sig_info = std::make_unique<FdInfo>(FdInfo{signal_fd, FdType::Signal});
+    ev.data.ptr = sig_info.get();
+    
+    epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, signal_fd, &ev);
+    m_fd_info[signal_fd] = std::move(sig_info);
 }
 
-void Server::run() {
-    epoll_event events[MAX_EVENTS];
+void Server::Run() {
+    epoll_event events[kMaxEventCount];
     
-    while (running_.load(std::memory_order_relaxed)) {
-        int nfds = epoll_wait(epoll_fd_, events, MAX_EVENTS, 1000);
+    while (m_running.load(std::memory_order_relaxed)) {
+        int nfds = epoll_wait(m_epoll_fd, events, kMaxEventCount, 1000);
         
         if (nfds == -1) {
             if (errno == EINTR) {
@@ -96,28 +112,39 @@ void Server::run() {
         }
         
         for (int i = 0; i < nfds; i++) {
-            int fd = events[i].data.fd;
+            FdInfo* info = static_cast<FdInfo*>(events[i].data.ptr);
             
-            if (fd == signal_fd_) {
-                stop();
-            } else if (fd == tcp_socket_->fd()) {
-                handle_tcp_accept();
-            } else if (fd == udp_socket_->fd()) {
-                handle_udp_message();
-            } else {
-                handle_tcp_client(fd);
+            try {
+                switch (info->type) {
+                    case FdType::Signal:
+                        Stop();
+                        break;
+                    case FdType::TcpListener:
+                        handleTcpAccept();
+                        break;
+                    case FdType::UdpSocket:
+                        handleUdpMessage();
+                        break;
+                    case FdType::TcpClient:
+                        handleTcpClient(info->fd);
+                        break;
+                }
+            } catch (const std::exception& e) {
+                // logging exception
+            } catch (...) {
+                // unknowing exception
             }
         }
     }
 }
 
-void Server::stop() {
-    running_.store(false, std::memory_order_relaxed);
+void Server::Stop() {
+    m_running.store(false, std::memory_order_relaxed);
 }
 
-void Server::handle_tcp_accept() {
+void Server::handleTcpAccept() {
     while (true) {
-        auto client_result = tcp_socket_->accept_connection();
+        auto client_result = m_tcp_socket->accept_connection();
         if (!client_result) {
             break;
         }
@@ -126,64 +153,79 @@ void Server::handle_tcp_accept() {
         
         epoll_event ev{};
         ev.events = EPOLLIN | EPOLLET;
-        ev.data.fd = client_fd;
         
-        if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
+        auto client_info = std::make_unique<FdInfo>(FdInfo{client_fd, FdType::TcpClient});
+        ev.data.ptr = client_info.get();
+        
+        if (epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
             close(client_fd);
             continue;
         }
         
-        clients_[client_fd] = true;
-        stats_.increment_total();
-        stats_.increment_current();
+        m_fd_info[client_fd] = std::move(client_info);
+        m_stats.increment_total();
+        m_stats.increment_current();
     }
 }
 
-void Server::handle_tcp_client(int client_fd) {
-    char buffer[BUFFER_SIZE];
-    
+void Server::handleTcpClient(int client_fd) {
+    auto close_connection_f = [this](int* client_fd_ptr){
+        if (!client_fd_ptr) {
+            return;
+        }
+
+        epoll_ctl(m_epoll_fd, EPOLL_CTL_DEL, *client_fd_ptr, nullptr);
+        close(*client_fd_ptr);
+        m_fd_info.erase(*client_fd_ptr);
+        m_stats.decrement_current();
+    };
+    std::unique_ptr<int, decltype(close_connection_f)> scope_guard(&client_fd, close_connection_f);
+
     while (true) {
+        char buffer[kBufferSize];
         ssize_t count = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
         
         if (count == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                break;
+                [[maybe_unused]] auto _ = scope_guard.release();
+                return;
             }
-            epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, client_fd, nullptr);
-            close(client_fd);
-            clients_.erase(client_fd);
-            stats_.decrement_current();
+            if (errno == EINTR) {
+                continue;
+            }
+
+            // process bad error
             break;
+
         } else if (count == 0) {
-            epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, client_fd, nullptr);
-            close(client_fd);
-            clients_.erase(client_fd);
-            stats_.decrement_current();
             break;
+
         } else {
             buffer[count] = '\0';
             std::string message(buffer, count);
-            std::string response = processor_.process(message);
-            
-            send(client_fd, response.c_str(), response.length(), 0);
+
+            std::string response = m_command_processor.process(message);   
+            send(client_fd, response.c_str(), response.length(), MSG_NOSIGNAL);
         }
     }
 }
 
-void Server::handle_udp_message() {
-    char buffer[BUFFER_SIZE];
+void Server::handleUdpMessage() {
+    char buffer[kBufferSize];
     
     while (true) {
         sockaddr_in client_addr{};
         socklen_t client_len = sizeof(client_addr);
         
-        ssize_t count = recvfrom(udp_socket_->fd(), buffer, sizeof(buffer) - 1, 0,
+        ssize_t count = recvfrom(m_udp_socket->fd(), buffer, sizeof(buffer) - 1, 0,
                                   (sockaddr*)&client_addr, &client_len);
         
         if (count == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 break;
             }
+
+            // process bad error
             break;
         }
         
@@ -193,9 +235,9 @@ void Server::handle_udp_message() {
         
         buffer[count] = '\0';
         std::string message(buffer, count);
-        std::string response = processor_.process(message);
+        std::string response = m_command_processor.process(message);
         
-        sendto(udp_socket_->fd(), response.c_str(), response.length(), 0,
+        sendto(m_udp_socket->fd(), response.c_str(), response.length(), MSG_NOSIGNAL,
                (sockaddr*)&client_addr, client_len);
     }
 }

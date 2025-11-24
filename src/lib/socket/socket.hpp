@@ -16,8 +16,6 @@ enum class SocketError {
     ReceiveFailed
 };
 
-template<typename T>
-using Result = std::optional<T>;
 
 class Socket {
 public:
@@ -26,7 +24,7 @@ public:
     int fd() const { return fd_; }
     bool is_valid() const { return fd_ >= 0; }
     
-    Result<SocketError> set_nonblocking();
+    bool set_nonblocking();
     
 protected:
     explicit Socket(int fd) : fd_(fd) {}
@@ -40,9 +38,9 @@ protected:
 
 class TcpSocket : public Socket {
 public:
-    static Result<TcpSocket> create(int port);
+    static std::optional<TcpSocket> create(int port);
     
-    Result<int> accept_connection();
+    std::optional<int> accept_connection();
     
 private:
     using Socket::Socket;
@@ -50,7 +48,7 @@ private:
 
 class UdpSocket : public Socket {
 public:
-    static Result<UdpSocket> create(int port);
+    static std::optional<UdpSocket> create(int port);
     
 private:
     using Socket::Socket;

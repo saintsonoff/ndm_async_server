@@ -6,9 +6,9 @@
 
 namespace async_server {
 
-Config Config::load() {
-    int tcp_port = DEFAULT_TCP_PORT;
-    int udp_port = DEFAULT_UDP_PORT;
+Config Config::FromEnv() {
+    int tcp_port = kDefaultTcpPort;
+    int udp_port = kDefaultUdpPort;
     
     if (const char* env_tcp = std::getenv("TCP_PORT")) {
         int port = 0;

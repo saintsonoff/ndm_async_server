@@ -1,7 +1,7 @@
 // stlcpp
 #include <iostream>
 
-//stlc
+// stlc
 #include <csignal>
 
 // unix
@@ -9,39 +9,44 @@
 #include <unistd.h>
 
 // self
-#include <server/server.hpp>
 #include <config/config.hpp>
+#include <memory>
+#include <server/server.hpp>
 
 int main() {
-    // Блокируем сигналы для обработки через signalfd
     sigset_t mask;
     sigemptyset(&mask);
     sigaddset(&mask, SIGINT);
     sigaddset(&mask, SIGTERM);
-    
+
     if (sigprocmask(SIG_BLOCK, &mask, nullptr) == -1) {
         std::cerr << "Failed to block signals\n";
         return 1;
     }
-    
-    // Создаём signalfd для получения сигналов через epoll
-    int signal_fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
-    if (signal_fd == -1) {
+
+    auto close_signal_fd_f = [](int* fd_ptr){
+        close(*fd_ptr);
+    };
+
+    int signal_fd_value = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
+    std::unique_ptr<int, decltype(close_signal_fd_f)> 
+        signal_fd(&signal_fd_value, close_signal_fd_f);
+
+    if (*signal_fd == -1) {
         std::cerr << "Failed to create signalfd\n";
         return 1;
     }
-    
-    async_server::Config config = async_server::Config::load();
-    async_server::Server server(std::move(config));
-    
-    if (!server.initialize()) {
-        close(signal_fd);
+
+    async_server::Server server(
+        async_server::Config::FromEnv()
+    );
+
+    if (!server.Initialize()) {
         return 1;
     }
-    
-    server.add_signal_fd(signal_fd);
-    server.run();
-    
-    close(signal_fd);
+
+    server.AddSignalFd(*signal_fd);
+    server.Run();
+
     return 0;
 }
