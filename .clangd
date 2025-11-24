@@ -1,0 +1,19 @@
+CompileFlags:
+  Add:
+    - "-I/workspaces/ndm_async_server/src/build/include"
+    - "-std=c++23"
+    - "-Wall"
+    - "-Wextra"
+  Remove:
+    - "-W*"
+  Compiler: g++
+
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None
+  ClangTidy:
+    Add: []
+    Remove: []
+
+Index:
+  Background: Build
