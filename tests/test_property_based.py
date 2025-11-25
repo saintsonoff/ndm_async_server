@@ -7,25 +7,7 @@ import os
 from typing import List
 
 
-def load_env():
-    env_vars = {}
-    env_path = "/workspaces/ndm_async_server/.env"
-    
-    if os.path.exists(env_path):
-        with open(env_path, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    env_vars[key.strip()] = value.strip()
-    
-    tcp_port = int(env_vars.get('TCP_PORT', os.getenv('TCP_PORT', '8080')))
-    udp_port = int(env_vars.get('UDP_PORT', os.getenv('UDP_PORT', '8040')))
-    
-    return tcp_port, udp_port
-
-
-TCP_PORT, UDP_PORT = load_env()
+TCP_PORT, UDP_PORT = int(os.getenv('TCP_PORT', '8080')), int(os.getenv('UDP_PORT', '8040'))
 
 
 @pytest.fixture(scope="module")

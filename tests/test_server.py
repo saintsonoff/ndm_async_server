@@ -5,29 +5,13 @@ import threading
 import subprocess
 import os
 import signal
+import psutil
+import statistics
 from datetime import datetime
 from typing import List, Tuple
 
 
-def load_env():
-    env_vars = {}
-    env_path = "/workspaces/ndm_async_server/.env"
-    
-    if os.path.exists(env_path):
-        with open(env_path, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    env_vars[key.strip()] = value.strip()
-    
-    tcp_port = int(env_vars.get('TCP_PORT', os.getenv('TCP_PORT', '8080')))
-    udp_port = int(env_vars.get('UDP_PORT', os.getenv('UDP_PORT', '8040')))
-    
-    return tcp_port, udp_port
-
-
-TCP_PORT, UDP_PORT = load_env()
+TCP_PORT, UDP_PORT = int(os.getenv('TCP_PORT', '8080')), int(os.getenv('UDP_PORT', '8040'))
 
 
 @pytest.fixture(scope="session")
@@ -353,13 +337,42 @@ class TestEdgeCases:
         response = client.recv(1024)
         client.close()
         assert response == b"/invalid_command"
+    
+    def test_tcp_message_exceeding_buffer(self, server_process, tcp_client):
+        client = tcp_client()
+        message = b"Z" * 10000
+        client.sendall(message)
+        response = b""
+        while len(response) < len(message):
+            chunk = client.recv(8192)
+            if not chunk:
+                break
+            response += chunk
+        client.close()
+        assert response == message
+    
+    def test_udp_message_at_buffer_limit(self, server_process, udp_client):
+        client, port = udp_client()
+        message = b"M" * 8191
+        client.sendto(message, ("localhost", port))
+        response, addr = client.recvfrom(8192)
+        client.close()
+        assert response == message
+    
+    def test_udp_message_exceeding_buffer(self, server_process, udp_client):
+        client, port = udp_client()
+        message = b"L" * 8200
+        client.sendto(message, ("localhost", port))
+        response, addr = client.recvfrom(8192)
+        client.close()
+        assert b"Error: Message too large" in response
 
 
 class TestPerformance:
     
     def test_throughput_tcp(self, server_process, tcp_client):
         client = tcp_client()
-        num_messages = 100
+        num_messages = 1000
         
         start_time = time.time()
         for i in range(num_messages):
@@ -373,11 +386,11 @@ class TestPerformance:
         
         duration = end_time - start_time
         throughput = num_messages / duration
-        assert throughput > 10
+        assert throughput > 100
     
     def test_concurrent_load(self, server_process, tcp_client):
-        num_clients = 50
-        messages_per_client = 5
+        num_clients = 200
+        messages_per_client = 20
         results = []
         
         def load_task(client_id: int):
@@ -403,9 +416,250 @@ class TestPerformance:
             threads.append(thread)
         
         for thread in threads:
-            thread.join(timeout=30)
+            thread.join(timeout=60)
         end_time = time.time()
         
         assert len(results) == num_clients
         assert all(results)
-        assert end_time - start_time < 10
+        assert end_time - start_time < 30
+    
+    def test_latency_percentiles(self, server_process, tcp_client):
+        num_requests = 1000
+        latencies = []
+        
+        client = tcp_client()
+        for i in range(num_requests):
+            message = f"Latency test {i}".encode()
+            
+            start = time.perf_counter()
+            client.sendall(message)
+            response = client.recv(1024)
+            end = time.perf_counter()
+            
+            assert response == message
+            latencies.append((end - start) * 1000)
+        
+        client.close()
+        
+        latencies.sort()
+        p50 = statistics.median(latencies)
+        p95 = latencies[int(0.95 * len(latencies))]
+        p99 = latencies[int(0.99 * len(latencies))]
+        avg = statistics.mean(latencies)
+        
+        print(f"\nLatency statistics (ms):")
+        print(f"  Average: {avg:.2f}")
+        print(f"  p50: {p50:.2f}")
+        print(f"  p95: {p95:.2f}")
+        print(f"  p99: {p99:.2f}")
+        
+        assert p50 < 10
+        assert p95 < 50
+        assert p99 < 100
+    
+    def test_cpu_memory_usage_under_load(self, server_process, tcp_client):
+        server_pid = None
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if 'async_server' in ' '.join(proc.info['cmdline'] or []):
+                    server_pid = proc.info['pid']
+                    break
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        
+        if server_pid is None:
+            pytest.skip("Server process not found")
+        
+        server_proc = psutil.Process(server_pid)
+        
+        cpu_samples = []
+        memory_samples = []
+        
+        def monitor_resources():
+            for _ in range(10):
+                try:
+                    cpu_samples.append(server_proc.cpu_percent(interval=0.1))
+                    memory_samples.append(server_proc.memory_info().rss / 1024 / 1024)
+                except psutil.NoSuchProcess:
+                    break
+                time.sleep(0.1)
+        
+        monitor_thread = threading.Thread(target=monitor_resources, daemon=True)
+        monitor_thread.start()
+        
+        num_clients = 50
+        results = []
+        
+        def load_task(client_id: int):
+            try:
+                client = tcp_client()
+                for i in range(10):
+                    message = f"Load{client_id}Msg{i}".encode()
+                    client.sendall(message)
+                    response = client.recv(1024)
+                    if response != message:
+                        results.append(False)
+                        return
+                client.close()
+                results.append(True)
+            except Exception:
+                results.append(False)
+        
+        threads = []
+        for i in range(num_clients):
+            thread = threading.Thread(target=load_task, args=(i,))
+            thread.start()
+            threads.append(thread)
+        
+        for thread in threads:
+            thread.join(timeout=30)
+        
+        monitor_thread.join(timeout=2)
+        
+        if cpu_samples and memory_samples:
+            avg_cpu = statistics.mean(cpu_samples)
+            max_cpu = max(cpu_samples)
+            avg_memory = statistics.mean(memory_samples)
+            max_memory = max(memory_samples)
+            
+            print(f"\nResource usage during load:")
+            print(f"  CPU: avg={avg_cpu:.1f}%, max={max_cpu:.1f}%")
+            print(f"  Memory: avg={avg_memory:.1f}MB, max={max_memory:.1f}MB")
+            
+            assert max_cpu < 90
+            assert max_memory < 100
+        
+        assert all(results)
+
+
+class TestPartialIO:
+    
+    def test_partial_send_recv(self, server_process, tcp_client):
+        client = tcp_client()
+        client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        
+        large_message = b"X" * 16384
+        
+        sent_total = 0
+        while sent_total < len(large_message):
+            try:
+                chunk_size = min(1024, len(large_message) - sent_total)
+                sent = client.send(large_message[sent_total:sent_total + chunk_size])
+                if sent == 0:
+                    break
+                sent_total += sent
+                time.sleep(0.001)
+            except BlockingIOError:
+                time.sleep(0.01)
+                continue
+        
+        assert sent_total == len(large_message)
+        
+        received = b""
+        while len(received) < len(large_message):
+            try:
+                chunk = client.recv(4096)
+                if not chunk:
+                    break
+                received += chunk
+            except BlockingIOError:
+                time.sleep(0.01)
+                continue
+        
+        client.close()
+        assert received == large_message
+    
+    def test_non_blocking_behavior(self, server_process, tcp_client):
+        client = tcp_client()
+        client.setblocking(False)
+        
+        message = b"Non-blocking test"
+        
+        sent = False
+        for _ in range(100):
+            try:
+                client.sendall(message)
+                sent = True
+                break
+            except BlockingIOError:
+                time.sleep(0.01)
+        
+        assert sent
+        
+        response = b""
+        for _ in range(100):
+            try:
+                chunk = client.recv(1024)
+                if chunk:
+                    response += chunk
+                    if len(response) >= len(message):
+                        break
+            except BlockingIOError:
+                time.sleep(0.01)
+        
+        client.close()
+        assert response == message
+    
+    def test_interrupted_operations(self, server_process, tcp_client):
+        client = tcp_client()
+        
+        def signal_handler(signum, frame):
+            pass
+        
+        old_handler = signal.signal(signal.SIGALRM, signal_handler)
+        
+        try:
+            messages_sent = 0
+            for i in range(50):
+                message = f"Interrupted {i}".encode()
+                
+                signal.setitimer(signal.ITIMER_REAL, 0.001)
+                
+                try:
+                    client.sendall(message)
+                    response = client.recv(1024)
+                    assert response == message
+                    messages_sent += 1
+                except InterruptedError:
+                    continue
+                finally:
+                    signal.setitimer(signal.ITIMER_REAL, 0)
+            
+            client.close()
+            assert messages_sent > 40
+        
+        finally:
+            signal.signal(signal.SIGALRM, old_handler)
+            signal.setitimer(signal.ITIMER_REAL, 0)
+    
+    def test_slow_consumer(self, server_process, tcp_client):
+        client = tcp_client()
+        
+        num_messages = 20
+        for i in range(num_messages):
+            message = f"Slow consumer {i}".encode()
+            client.sendall(message)
+            
+            time.sleep(0.05)
+            
+            response = client.recv(1024)
+            assert response == message
+        
+        client.close()
+    
+    def test_fragmented_udp_behavior(self, server_process, udp_client):
+        client, port = udp_client()
+        
+        sizes = [100, 500, 1000, 2000, 4000, 8000]
+        
+        for size in sizes:
+            message = b"F" * size
+            client.sendto(message, ("localhost", port))
+            
+            try:
+                response, addr = client.recvfrom(8192)
+                assert response == message
+            except socket.timeout:
+                pytest.fail(f"Timeout receiving {size} byte message")
+        
+        client.close()

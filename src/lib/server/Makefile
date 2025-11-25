@@ -8,9 +8,9 @@ LIB_TARGET := $(LIB_DIR)/libserver.a
 
 DEP_LIBS := $(LIB_DIR)/libconfig.a $(LIB_DIR)/libsocket.a $(LIB_DIR)/libcommand.a
 
-SOURCES := server.cpp
+SOURCES := server.cpp server_builder.cpp
 OBJECTS := $(SOURCES:%.cpp=$(LOCAL_OBJS_DIR)/%.o)
-HEADERS := server.hpp
+HEADERS := server.hpp server_builder.hpp
 INSTALLED_HEADERS := $(HEADERS:%.hpp=$(LOCAL_INCLUDE_DIR)/%.hpp)
 
 .PHONY: all clean

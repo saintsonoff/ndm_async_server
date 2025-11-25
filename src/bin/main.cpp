@@ -1,5 +1,6 @@
 // stlcpp
 #include <iostream>
+#include <memory>
 
 // stlc
 #include <csignal>
@@ -10,8 +11,7 @@
 
 // self
 #include <config/config.hpp>
-#include <memory>
-#include <server/server.hpp>
+#include <server/server_builder.hpp>
 
 int main() {
     sigset_t mask;
@@ -24,29 +24,30 @@ int main() {
         return 1;
     }
 
-    auto close_signal_fd_f = [](int* fd_ptr){
-        close(*fd_ptr);
-    };
-
-    int signal_fd_value = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
-    std::unique_ptr<int, decltype(close_signal_fd_f)> 
-        signal_fd(&signal_fd_value, close_signal_fd_f);
-
-    if (*signal_fd == -1) {
+    int signal_fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
+    if (signal_fd == -1) {
         std::cerr << "Failed to create signalfd\n";
         return 1;
     }
 
-    async_server::Server server(
-        async_server::Config::FromEnv()
-    );
+    auto close_fd = [](int* fd) {
+        if (fd && *fd != -1) {
+            close(*fd);
+        }
+    };
+    std::unique_ptr<int, decltype(close_fd)> signal_fd_guard(&signal_fd, close_fd);
 
-    if (!server.Initialize()) {
+    auto server_result = async_server::ServerBuilder(async_server::Config::FromEnv())
+        .WithSignalFd(signal_fd)
+        .Build();
+    
+    if (!server_result) {
+        std::cerr << "Server build failed: " << server_result.error() << "\n";
         return 1;
     }
 
-    server.AddSignalFd(*signal_fd);
-    server.Run();
-
+    auto server = std::move(*server_result);
+    server->Run();
+    
     return 0;
 }

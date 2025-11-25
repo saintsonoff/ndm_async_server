@@ -3,6 +3,8 @@
 // stlcpp
 #include <optional>
 #include <utility>
+#include <expected>
+#include <string>
 
 namespace async_server {
 
@@ -21,34 +23,40 @@ class Socket {
 public:
     virtual ~Socket();
     
-    int fd() const { return fd_; }
-    bool is_valid() const { return fd_ >= 0; }
+    int fd() const { return m_fd; }
+    bool is_valid() const { return m_fd >= 0; }
     
     bool set_nonblocking();
     
 protected:
-    explicit Socket(int fd) : fd_(fd) {}
+    explicit Socket(int fd) : m_fd(fd) {}
     Socket(const Socket&) = delete;
     Socket& operator=(const Socket&) = delete;
     Socket(Socket&& other) noexcept;
     Socket& operator=(Socket&& other) noexcept;
     
-    int fd_ = -1;
+    int m_fd = -1;
 };
 
 class TcpSocket : public Socket {
 public:
-    static std::optional<TcpSocket> create(int port);
+    using TcpCreateResult = std::expected<TcpSocket, std::string>;
+
+public:
+    static TcpCreateResult create(int port);
     
     std::optional<int> accept_connection();
-    
+
 private:
     using Socket::Socket;
 };
 
 class UdpSocket : public Socket {
 public:
-    static std::optional<UdpSocket> create(int port);
+    using UdpCreateResult = std::expected<UdpSocket, std::string>;
+
+public:
+    static UdpCreateResult create(int port);
     
 private:
     using Socket::Socket;

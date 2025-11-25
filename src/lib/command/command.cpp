@@ -46,8 +46,7 @@ std::string CommandProcessor::get_time() const {
 
 std::string CommandProcessor::get_stats() const {
     std::ostringstream oss;
-    oss << "Total: " << stats_.get_total() 
-        << ", Current: " << stats_.get_current();
+    oss << "Total: " << stats_.get_total() << "\t" << "Current: " << stats_.get_current();
     return oss.str();
 }
 
