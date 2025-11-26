@@ -2,6 +2,7 @@
 
 // stlcpp
 #include <memory>
+#include "server.hpp"
 
 // unix
 #include <sys/epoll.h>
@@ -38,26 +39,26 @@ std::expected<std::unique_ptr<Server>, std::string> ServerBuilder::Build() {
         return std::unexpected("Failed to create epoll fd");
     }
 
-    auto close_epoll = [](int* fd) {
-        if (fd && *fd != -1) {
-            close(*fd);
+    auto close_epoll = [](int* fd_ptr) {
+        if (fd_ptr && *fd_ptr != -1) {
+            close(*fd_ptr);
         }
     };
     std::unique_ptr<int, decltype(close_epoll)> epoll_guard(&epoll_fd, close_epoll);
 
-    std::unordered_map<int, std::pair<int, FdType>> fd_info;
+    std::unordered_map<int, FdType> fd_info;
     
     epoll_event ev;
     ev.events = EPOLLIN | EPOLLET;
 
-    auto [tcp_it, tcp_inserted] = fd_info.emplace(tcp_socket->fd(), std::make_pair(tcp_socket->fd(), FdType::TcpListener));
-    ev.data.ptr = &tcp_it->second;
+    fd_info.emplace(tcp_socket->fd(), FdType::TcpListener);
+    ev.data.fd = tcp_socket->fd();
     if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, tcp_socket->fd(), &ev) == -1) {
         return std::unexpected("Failed to add TCP socket to epoll");
     }
 
-    auto [udp_it, udp_inserted] = fd_info.emplace(udp_socket->fd(), std::make_pair(udp_socket->fd(), FdType::UdpSocket));
-    ev.data.ptr = &udp_it->second;
+    fd_info.emplace(udp_socket->fd(), FdType::UdpSocket);
+    ev.data.fd = udp_socket->fd();
     if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, udp_socket->fd(), &ev) == -1) {
         return std::unexpected("Failed to add UDP socket to epoll");
     }
@@ -66,8 +67,8 @@ std::expected<std::unique_ptr<Server>, std::string> ServerBuilder::Build() {
         epoll_event sig_ev{};
         sig_ev.events = EPOLLIN;
         
-        auto [sig_it, sig_inserted] = fd_info.emplace(m_signal_fd, std::make_pair(m_signal_fd, FdType::Signal));
-        sig_ev.data.ptr = &sig_it->second;
+        fd_info.emplace(m_signal_fd, FdType::Signal);
+        sig_ev.data.fd = m_signal_fd;
         
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, m_signal_fd, &sig_ev) == -1) {
             return std::unexpected("Failed to add signal fd to epoll");
@@ -76,12 +77,14 @@ std::expected<std::unique_ptr<Server>, std::string> ServerBuilder::Build() {
 
     [[maybe_unused]] auto _ = epoll_guard.release();
 
-    return std::unique_ptr<Server>(new Server(
+    auto server_ptr = std::unique_ptr<Server>(new Server(
         std::move(tcp_socket),
         std::move(udp_socket),
         epoll_fd,
         std::move(fd_info)
     ));
+
+    return server_ptr;
 }
 
 

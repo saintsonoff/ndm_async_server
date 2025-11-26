@@ -37,12 +37,9 @@ def udp_socket(server_ready):
 
 class TestPropertyBasedTCP:
     
-    @given(message=st.text(min_size=1, max_size=1000).map(lambda x: x.encode('utf-8')))
+    @given(message=st.text(min_size=1, max_size=100000).filter(lambda x: not x.startswith('/')).map(lambda x: x.encode('utf-8')))
     @settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_tcp_echo_property(self, tcp_socket, message):
-        if message.startswith(b'/'):
-            pytest.skip("Command messages tested separately")
-        
         tcp_socket.sendall(message)
         response = b""
         while len(response) < len(message):
@@ -104,12 +101,9 @@ class TestPropertyBasedTCP:
 
 class TestPropertyBasedUDP:
     
-    @given(message=st.text(min_size=1, max_size=1000).map(lambda x: x.encode('utf-8')))
+    @given(message=st.text(min_size=1, max_size=100000).filter(lambda x: not x.startswith('/')).map(lambda x: x.encode('utf-8')))
     @settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_udp_echo_property(self, udp_socket, message):
-        if message.startswith(b'/'):
-            pytest.skip("Command messages tested separately")
-        
         sock, port = udp_socket
         sock.sendto(message, ("localhost", port))
         response, addr = sock.recvfrom(4096)

@@ -23,7 +23,7 @@ enum class FdType : uint8_t {
 
 class ServerBuilder;
 
-class Server {
+class Server final {
 public:
     ~Server();
     
@@ -39,7 +39,7 @@ private:
     Server(std::unique_ptr<TcpSocket>&& tcp_socket,
            std::unique_ptr<UdpSocket>&& udp_socket,
            int epoll_fd,
-           std::unordered_map<int, std::pair<int, FdType>> fd_info);
+           std::unordered_map<int, FdType> fd_info);
     
 private:
     void handleTcpAccept();
@@ -48,13 +48,12 @@ private:
     
     Statistics m_stats;
     std::atomic<bool> m_running{true};
-    CommandProcessor m_command_processor;
     
     std::unique_ptr<TcpSocket> m_tcp_socket;
     std::unique_ptr<UdpSocket> m_udp_socket;
     
     int m_epoll_fd = -1;
-    std::unordered_map<int, std::pair<int, FdType>> m_fd_info;
+    std::unordered_map<int, FdType> m_fd_info;
     
     static constexpr int kMaxEventCount = 64;
     static constexpr int kBufferSize = 8192;

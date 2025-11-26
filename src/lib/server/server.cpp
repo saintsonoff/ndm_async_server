@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstring>
+#include "command/command.hpp"
 
 // unix
 #include <sys/epoll.h>
@@ -22,9 +23,8 @@ namespace async_server {
 Server::Server(std::unique_ptr<TcpSocket>&& tcp_socket,
                std::unique_ptr<UdpSocket>&& udp_socket,
                int epoll_fd,
-               std::unordered_map<int, std::pair<int, FdType>> fd_info)
+               std::unordered_map<int, FdType> fd_info)
     : m_stats()
-    , m_command_processor(m_stats, m_running)
     , m_tcp_socket(std::move(tcp_socket))
     , m_udp_socket(std::move(udp_socket))
     , m_epoll_fd(epoll_fd)
@@ -32,8 +32,8 @@ Server::Server(std::unique_ptr<TcpSocket>&& tcp_socket,
 }
 
 Server::~Server() {
-    for (auto& [fd, info] : m_fd_info) {
-        if (info.second != FdType::TcpListener && info.second != FdType::UdpSocket) {
+    for (auto& [fd, fd_type] : m_fd_info) {
+        if (fd_type != FdType::TcpListener && fd_type != FdType::UdpSocket) {
             close(fd);
         }
     }
@@ -57,10 +57,14 @@ void Server::Run() {
         }
         
         for (int i = 0; i < nfds; i++) {
-            auto* info = static_cast<std::pair<int, FdType>*>(events[i].data.ptr);
+            int fd = events[i].data.fd;
+            auto it = m_fd_info.find(fd);
+            if (it == m_fd_info.end()) {
+                continue;
+            }
             
             try {
-                switch (info->second) {
+                switch (it->second) {
                     case FdType::Signal:
                         Stop();
                         break;
@@ -71,7 +75,7 @@ void Server::Run() {
                         handleUdpMessage();
                         break;
                     case FdType::TcpClient:
-                        handleTcpClient(info->first);
+                        handleTcpClient(fd);
                         break;
                 }
             } catch (const std::exception& e) {
@@ -98,12 +102,12 @@ void Server::handleTcpAccept() {
         
         epoll_event ev{};
         ev.events = EPOLLIN | EPOLLET;
+        ev.data.fd = client_fd;
         
-        auto [it, inserted] = m_fd_info.emplace(client_fd, std::make_pair(client_fd, FdType::TcpClient));
-        ev.data.ptr = &it->second;
+        m_fd_info.emplace(client_fd, FdType::TcpClient);
         
         if (epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
-            m_fd_info.erase(it);
+            m_fd_info.erase(client_fd);
             close(client_fd);
             continue;
         }
@@ -148,7 +152,7 @@ void Server::handleTcpClient(int client_fd) {
             buffer[count] = '\0';
             std::string message(buffer, count);
 
-            std::string response = m_command_processor.process(message);   
+            std::string response = CommandProcessor(m_stats, m_running).process(message);   
             send(client_fd, response.c_str(), response.length(), MSG_NOSIGNAL);
         }
     }
@@ -187,7 +191,7 @@ void Server::handleUdpMessage() {
         
         buffer[count] = '\0';
         std::string message(buffer, count);
-        std::string response = m_command_processor.process(message);
+        std::string response = CommandProcessor(m_stats, m_running).process(message);
         
         sendto(m_udp_socket->fd(), response.c_str(), response.length(), MSG_NOSIGNAL,
                (sockaddr*)&client_addr, client_len);

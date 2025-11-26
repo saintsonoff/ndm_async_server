@@ -2,7 +2,7 @@
 
 namespace async_server {
 
-class Config {
+class Config final {
 public:
     Config()
         : m_tcp_port(kDefaultTcpPort), m_udp_port(kDefaultUdpPort) {};
