@@ -6,6 +6,9 @@
 #include <expected>
 #include <string>
 
+// unix
+#include <netinet/in.h>
+
 namespace async_server {
 
 enum class SocketError {
@@ -45,7 +48,7 @@ public:
 public:
     static TcpCreateResult create(int port);
     
-    std::optional<int> accept_connection();
+    std::expected<std::pair<int, sockaddr_in>, std::string> accept_connection();
 
 private:
     using Socket::Socket;

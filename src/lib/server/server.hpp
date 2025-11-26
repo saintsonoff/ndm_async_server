@@ -30,7 +30,7 @@ public:
     Server(const Server&) = delete;
     Server& operator=(const Server&) = delete;
     
-    void Run();
+    std::optional<std::string> Run();
     void Stop();
     
 private:
@@ -42,10 +42,11 @@ private:
            std::unordered_map<int, FdType> fd_info);
     
 private:
-    void handleTcpAccept();
-    void handleTcpClient(int client_fd);
-    void handleUdpMessage();
-    
+    std::optional<std::string> handleTcpAccept();
+    std::optional<std::string> handleTcpClient(int client_fd);
+    std::optional<std::string> handleUdpMessage();
+
+private:
     Statistics m_stats;
     std::atomic<bool> m_running{true};
     

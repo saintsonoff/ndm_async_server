@@ -2,6 +2,7 @@
 
 // stlcpp
 #include <memory>
+#include <ranges>
 
 // stlc
 #include <cerrno>
@@ -43,7 +44,7 @@ Server::~Server() {
     }
 }
 
-void Server::Run() {
+std::optional<std::string> Server::Run() {
     epoll_event events[kMaxEventCount];
     
     while (m_running.load(std::memory_order_relaxed)) {
@@ -53,52 +54,60 @@ void Server::Run() {
             if (errno == EINTR) {
                 continue;
             }
-            break;
+            return std::strerror(errno);
         }
         
-        for (int i = 0; i < nfds; i++) {
-            int fd = events[i].data.fd;
+        for (auto& event : events | std::views::take(nfds)) {
+            int fd = event.data.fd;
             auto it = m_fd_info.find(fd);
             if (it == m_fd_info.end()) {
                 continue;
             }
             
+            std::optional<std::string> process_status = std::nullopt;
             try {
                 switch (it->second) {
                     case FdType::Signal:
                         Stop();
                         break;
                     case FdType::TcpListener:
-                        handleTcpAccept();
+                        process_status = handleTcpAccept();
                         break;
                     case FdType::UdpSocket:
-                        handleUdpMessage();
+                        process_status = handleUdpMessage();
                         break;
                     case FdType::TcpClient:
-                        handleTcpClient(fd);
+                        process_status = handleTcpClient(fd);
                         break;
                 }
             } catch (const std::exception& e) {
-                // logging exception
-            } catch (...) {
-                // unknowing exception
+                return e.what();
+            }
+
+            if (process_status) {
+                return process_status;
             }
         }
     }
+
+    return std::nullopt;
 }
 
 void Server::Stop() {
     m_running.store(false, std::memory_order_relaxed);
 }
 
-void Server::handleTcpAccept() {
+std::optional<std::string> Server::handleTcpAccept() {
     while (true) {
         auto client_result = m_tcp_socket->accept_connection();
         if (!client_result) {
-            break;
+            return client_result.error();
         }
         
-        int client_fd = *client_result;
+        int client_fd = client_result.value().first;
+        if (client_fd == -1) {
+            break;
+        }
         
         epoll_event ev{};
         ev.events = EPOLLIN | EPOLLET;
@@ -114,10 +123,12 @@ void Server::handleTcpAccept() {
         m_stats.increment_total();
         m_stats.increment_current();
     }
+    
+    return std::nullopt;
 }
 
-void Server::handleTcpClient(int client_fd) {
-    auto close_connection_f = [this](int* client_fd_ptr){
+std::optional<std::string> Server::handleTcpClient(int client_fd) {
+    auto close_connection = [this](int* client_fd_ptr){
         if (!client_fd_ptr) {
             return;
         }
@@ -127,7 +138,7 @@ void Server::handleTcpClient(int client_fd) {
         m_fd_info.erase(*client_fd_ptr);
         m_stats.decrement_current();
     };
-    std::unique_ptr<int, decltype(close_connection_f)> scope_guard(&client_fd, close_connection_f);
+    std::unique_ptr<int, decltype(close_connection)> scope_guard(&client_fd, close_connection);
 
     while (true) {
         char buffer[kBufferSize];
@@ -136,14 +147,13 @@ void Server::handleTcpClient(int client_fd) {
         if (count == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 [[maybe_unused]] auto _ = scope_guard.release();
-                return;
+                return std::nullopt;
             }
             if (errno == EINTR) {
                 continue;
             }
 
-            // process bad error
-            break;
+            return std::string("TCP recv error: ") + std::strerror(errno);
 
         } else if (count == 0) {
             break;
@@ -152,16 +162,25 @@ void Server::handleTcpClient(int client_fd) {
             buffer[count] = '\0';
             std::string message(buffer, count);
 
-            std::string response = CommandProcessor(m_stats, m_running).process(message);   
-            send(client_fd, response.c_str(), response.length(), MSG_NOSIGNAL);
+            std::string response = CommandProcessor(m_stats, m_running).process(message);
+            ssize_t sent = send(client_fd, response.c_str(), response.length(), MSG_NOSIGNAL);
+            
+            if (sent == -1) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                    break;
+                }
+                return std::string("TCP send error: ") + std::strerror(errno);
+            }
         }
     }
+    
+    return std::nullopt;
 }
 
-void Server::handleUdpMessage() {
-    char buffer[kBufferSize];
-    
+std::optional<std::string> Server::handleUdpMessage() {
     while (true) {
+        char buffer[kBufferSize];
+
         sockaddr_in client_addr{};
         socklen_t client_len = sizeof(client_addr);
 
@@ -172,9 +191,10 @@ void Server::handleUdpMessage() {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 break;
             }
-
-            // process bad error
-            break;
+            if (errno == EINTR) {
+                continue;
+            }
+            return std::string("UDP recvfrom error: ") + std::strerror(errno);
         }
         
         if (count == 0) {
@@ -182,10 +202,13 @@ void Server::handleUdpMessage() {
         }
         
         if (count >= static_cast<ssize_t>(sizeof(buffer))) {
-            std::string error_msg = "Error: Message too large (max " + 
+            static const std::string error_msg = "Error: Message too large (max " + 
                                     std::to_string(sizeof(buffer) - 1) + " bytes)";
-            sendto(m_udp_socket->fd(), error_msg.c_str(), error_msg.length(), MSG_NOSIGNAL,
-                   (sockaddr*)&client_addr, client_len);
+            ssize_t sent = sendto(m_udp_socket->fd(), error_msg.c_str(), error_msg.length(), MSG_NOSIGNAL,
+                                  (sockaddr*)&client_addr, client_len);
+            if (sent == -1 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+                return std::string("UDP sendto error: ") + std::strerror(errno);
+            }
             continue;
         }
         
@@ -193,9 +216,14 @@ void Server::handleUdpMessage() {
         std::string message(buffer, count);
         std::string response = CommandProcessor(m_stats, m_running).process(message);
         
-        sendto(m_udp_socket->fd(), response.c_str(), response.length(), MSG_NOSIGNAL,
-               (sockaddr*)&client_addr, client_len);
+        ssize_t sent = sendto(m_udp_socket->fd(), response.c_str(), response.length(), MSG_NOSIGNAL,
+                              (sockaddr*)&client_addr, client_len);
+        if (sent == -1 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+            return std::string("UDP sendto error: ") + std::strerror(errno);
+        }
     }
+    
+    return std::nullopt;
 }
 
 

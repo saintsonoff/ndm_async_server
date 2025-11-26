@@ -8,6 +8,7 @@
 // stlc
 #include <cerrno>
 #include <cstdio>
+#include <cstring>
 
 // unix
 #include <sys/socket.h>
@@ -94,16 +95,20 @@ TcpSocket::TcpCreateResult TcpSocket::create(int port) {
     return tcp_sock;
 }
 
-std::optional<int> TcpSocket::accept_connection() {
+std::expected<std::pair<int, sockaddr_in>, std::string> TcpSocket::accept_connection() {
     sockaddr_in client_addr{};
     socklen_t client_len = sizeof(client_addr);
 
-    int client_fd = accept(m_fd, reinterpret_cast<sockaddr*>(&client_addr), &client_len);
+    int client_fd = accept4(m_fd, 
+                           reinterpret_cast<sockaddr*>(&client_addr), 
+                           &client_len, 
+                           SOCK_NONBLOCK);
     if (client_fd < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            return std::nullopt;
+            return std::pair{-1, client_addr};
         }
-        return std::nullopt;
+        
+        return std::unexpected("accept() failed: " + std::string(std::strerror(errno)));
     }
 
     auto close_client = [](int* fd) {
@@ -112,19 +117,10 @@ std::optional<int> TcpSocket::accept_connection() {
         }
     };
     std::unique_ptr<int, decltype(close_client)> client_guard(&client_fd, close_client);
-
-    int flags = fcntl(client_fd, F_GETFL, 0);
-    if (flags == -1) {
-        return std::nullopt;
-    }
-    
-    if (fcntl(client_fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-        return std::nullopt;
-    }
     
     [[maybe_unused]] auto _ = client_guard.release();
     
-    return client_fd;
+    return std::pair{client_fd, client_addr};
 }
 
 UdpSocket::UdpCreateResult UdpSocket::create(int port) {
