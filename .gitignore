@@ -1,4 +1,9 @@
 # C++ staff
+
+# Clang ecosystem
+.clangd
+.clang-format
+
 # Prerequisites
 *.d
 
