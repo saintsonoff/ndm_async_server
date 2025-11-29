@@ -39,7 +39,7 @@ class TestHighLoadBenchmark:
     BURST_SIZE = 1000
     BURST_COUNT = 5
     BURST_PAUSE_SEC = 2.0
-    BURST_MAX_P99_MS = 200.0
+    BURST_MAX_P99_MS = 20.0
     
     POOL_SIZE = 20
     POOL_REQUESTS_PER_CONN = 500
@@ -91,15 +91,6 @@ class TestHighLoadBenchmark:
                 latencies.extend(local_latencies)
                 errors.append(local_errors)
         
-        print(f"\n{'='*70}")
-        print(f"High Load Benchmark: {target_rps:,} RPS target")
-        print(f"{'='*70}")
-        print(f"Configuration:")
-        print(f"  Workers: {num_workers}")
-        print(f"  Requests per worker: {requests_per_worker}")
-        print(f"  Total requests: {target_requests:,}")
-        print(f"  Duration: {duration_seconds}s")
-        
         start_time = time.time()
         
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -126,39 +117,11 @@ class TestHighLoadBenchmark:
         else:
             p50 = p95 = p99 = p999 = avg = min_lat = max_lat = 0
         
-        print(f"\n{'='*70}")
-        print(f"Results:")
-        print(f"{'='*70}")
-        print(f"Throughput:")
-        print(f"  Target RPS:      {target_rps:>10,}")
-        print(f"  Actual RPS:      {actual_rps:>10,.0f}")
-        print(f"  Achievement:     {(actual_rps/target_rps*100):>10.1f}%")
-        print(f"\nRequests:")
-        print(f"  Total:           {target_requests:>10,}")
-        print(f"  Successful:      {successful_requests:>10,}")
-        print(f"  Failed:          {total_errors:>10,}")
-        print(f"  Success rate:    {(successful_requests/target_requests*100):>10.2f}%")
-        print(f"\nLatency (ms):")
-        print(f"  Min:             {min_lat:>10.3f}")
-        print(f"  Average:         {avg:>10.3f}")
-        print(f"  p50 (median):    {p50:>10.3f}")
-        print(f"  p95:             {p95:>10.3f}")
-        print(f"  p99:             {p99:>10.3f}")
-        print(f"  p99.9:           {p999:>10.3f}")
-        print(f"  Max:             {max_lat:>10.3f}")
-        print(f"\nTiming:")
-        print(f"  Duration:        {actual_duration:>10.2f}s")
-        print(f"{'='*70}")
-        
         baseline_rps = self.TARGET_RPS_10K
         baseline_p99 = self.BASELINE_P99_MS
         
         rps_ratio = (actual_rps / baseline_rps) * 100
         p99_improvement = ((baseline_p99 - p99) / baseline_p99) * 100
-        
-        print(f"\nvs {baseline_rps:,} RPS baseline (p99={baseline_p99}ms):")
-        print(f"  RPS:  {rps_ratio:.0f}% of target ({actual_rps:,.0f} vs {baseline_rps:,})")
-        print(f"  p99:  {p99_improvement:+.1f}% {'better' if p99_improvement > 0 else 'worse'} ({p99:.3f}ms vs {baseline_p99}ms)")
         
         assert successful_requests > target_requests * self.SUCCESS_RATE_THRESHOLD
         assert actual_rps > target_rps * self.RPS_ACHIEVEMENT_THRESHOLD
@@ -221,10 +184,6 @@ class TestHighLoadBenchmark:
                 latencies.extend(local_latencies)
                 errors += local_errors
         
-        print(f"\n{'='*70}")
-        print(f"Sustained Load Test: {duration_seconds}s @ {target_rps:,} RPS")
-        print(f"{'='*70}")
-        
         threads = []
         for i in range(num_workers):
             t = threading.Thread(target=worker, args=(i,), daemon=True)
@@ -250,20 +209,6 @@ class TestHighLoadBenchmark:
         else:
             p50 = p95 = p99 = avg = 0
         
-        print(f"\nSustained Load Results:")
-        print(f"{'='*70}")
-        print(f"  Duration:        {actual_duration:.1f}s")
-        print(f"  Total requests:  {successful_requests:,}")
-        print(f"  Actual RPS:      {actual_rps:,.0f}")
-        print(f"  Failed:          {errors:,}")
-        print(f"  Success rate:    {(successful_requests/(successful_requests+errors)*100):.2f}%")
-        print(f"\nLatency (ms):")
-        print(f"  Average:         {avg:.3f}")
-        print(f"  p50:             {p50:.3f}")
-        print(f"  p95:             {p95:.3f}")
-        print(f"  p99:             {p99:.3f}")
-        print(f"{'='*70}")
-        
         assert actual_rps > target_rps * self.RPS_ACHIEVEMENT_THRESHOLD
         assert p99 < self.SUSTAINED_MAX_P99_MS
         assert (successful_requests / (successful_requests + errors)) > self.SUSTAINED_MIN_SUCCESS_RATE
@@ -274,14 +219,7 @@ class TestHighLoadBenchmark:
         pause_between_bursts = self.BURST_PAUSE_SEC
         
         all_latencies = []
-        
-        print(f"\n{'='*70}")
-        print(f"Burst Capacity Test")
-        print(f"{'='*70}")
-        print(f"  Burst size: {burst_size} concurrent requests")
-        print(f"  Number of bursts: {num_bursts}")
-        print(f"  Pause between: {pause_between_bursts}s")
-        
+
         for burst_num in range(num_bursts):
             latencies = []
             errors = 0
@@ -335,28 +273,13 @@ class TestHighLoadBenchmark:
             
             all_latencies.extend(latencies)
             
-            print(f"\nBurst #{burst_num + 1}:")
-            print(f"  Duration:    {burst_duration:.2f}s")
-            print(f"  Successful:  {len(latencies)}/{burst_size}")
-            print(f"  Failed:      {errors}")
-            print(f"  Avg latency: {avg:.2f}ms")
-            print(f"  p99 latency: {p99:.2f}ms")
-            
             if burst_num < num_bursts - 1:
                 time.sleep(pause_between_bursts)
         
         if all_latencies:
             all_latencies.sort()
             overall_p99 = all_latencies[int(0.99 * len(all_latencies))]
-            overall_avg = statistics.mean(all_latencies)
-            
-            print(f"\n{'='*70}")
-            print(f"Overall burst statistics:")
-            print(f"  Total requests:  {len(all_latencies):,}")
-            print(f"  Average latency: {overall_avg:.2f}ms")
-            print(f"  p99 latency:     {overall_p99:.2f}ms")
-            print(f"{'='*70}")
-            
+
             assert overall_p99 < self.BURST_MAX_P99_MS
     
     def test_connection_pool_reuse(self, server_ready):
@@ -401,14 +324,7 @@ class TestHighLoadBenchmark:
             with lock:
                 latencies.extend(local_latencies)
                 errors += local_errors
-        
-        print(f"\n{'='*70}")
-        print(f"Connection Pool Test")
-        print(f"{'='*70}")
-        print(f"  Pool size: {pool_size} connections")
-        print(f"  Requests per connection: {requests_per_connection}")
-        print(f"  Total requests: {total_requests:,}")
-        
+
         start_time = time.time()
         
         threads = []
@@ -431,20 +347,6 @@ class TestHighLoadBenchmark:
             avg = statistics.mean(latencies)
         else:
             p50 = p95 = p99 = avg = 0
-        
-        print(f"\nResults:")
-        print(f"{'='*70}")
-        print(f"  Duration:        {duration:.2f}s")
-        print(f"  Actual RPS:      {actual_rps:,.0f}")
-        print(f"  Successful:      {len(latencies):,}")
-        print(f"  Failed:          {errors}")
-        print(f"  Success rate:    {(len(latencies)/total_requests*100):.2f}%")
-        print(f"\nLatency (ms):")
-        print(f"  Average:         {avg:.3f}")
-        print(f"  p50:             {p50:.3f}")
-        print(f"  p95:             {p95:.3f}")
-        print(f"  p99:             {p99:.3f}")
-        print(f"{'='*70}")
-        
+
         assert len(latencies) > total_requests * self.POOL_MIN_SUCCESS_RATE
         assert p99 < self.POOL_MAX_P99_MS

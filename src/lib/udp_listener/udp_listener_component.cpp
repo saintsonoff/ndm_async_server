@@ -68,7 +68,7 @@ std::expected<void, std::string> UdpListenerComponent::handleUdpEvent(
     [[maybe_unused]] int fd, uint32_t events) {
     if (events & (EPOLLERR | EPOLLHUP)) {
         m_health = ComponentHealth::kDegraded;
-        return std::unexpected<std::string>("Error on listener socket");
+        return std::unexpected("Error on listener socket");
     }
 
     if (events & EPOLLIN) {
@@ -87,7 +87,7 @@ std::expected<void, std::string> UdpListenerComponent::handleUdpEvent(
                 }
 
                 m_health = ComponentHealth::kDegraded;
-                return std::unexpected<std::string>(std::strerror(errno));
+                return std::unexpected(std::strerror(errno));
             }
 
             std::string response;
@@ -103,7 +103,7 @@ std::expected<void, std::string> UdpListenerComponent::handleUdpEvent(
                        reinterpret_cast<sockaddr*>(&client_addr), client_len);
 
             if (sent < 0) {
-                return std::unexpected<std::string>(std::strerror(errno));
+                return std::unexpected(std::strerror(errno));
             }
         }
     }

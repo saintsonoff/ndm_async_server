@@ -59,7 +59,10 @@ std::expected<void, std::string> TcpListenerComponent::Stop() {
     }
 
     for (const auto& [fd, _] : m_clients) {
-        auto remove_status = m_event_loop.RemoveFd(m_listener->fd());
+        const char* shutdown_msg = "Server is shutting down\n";
+        send(fd, shutdown_msg, strlen(shutdown_msg), MSG_NOSIGNAL);
+
+        auto remove_status = m_event_loop.RemoveFd(fd);
         close(fd);
         if (!remove_status) {
             return std::unexpected(remove_status.error());
@@ -80,7 +83,7 @@ std::expected<void, std::string> TcpListenerComponent::handleListenerEvent(
     uint32_t events) {
     if (events & (EPOLLERR | EPOLLHUP)) {
         m_health = ComponentHealth::kDegraded;
-        return std::unexpected<std::string>("Error on listener socket");
+        return std::unexpected("Error on listener socket");
     }
 
     if (events & EPOLLIN) {
@@ -94,12 +97,17 @@ std::expected<void, std::string> TcpListenerComponent::acceptConnections() {
     while (true) {
         auto client_result = m_listener->accept_connection();
         if (!client_result) {
-            return std::unexpected<std::string>(client_result.error());
+            return std::unexpected(client_result.error());
         }
 
         int client_fd = client_result.value();
         if (client_fd == Socket::kInvalidFd) {
             break;
+        }
+
+        if (m_clients.size() >= kMaxClients) {
+            close(client_fd);
+            continue;
         }
 
         auto add_status = m_event_loop.AddFd(
@@ -138,9 +146,9 @@ std::expected<void, std::string> TcpListenerComponent::handleClientEvent(
         socklen_t errlen = sizeof(error);
 
         if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &errlen) == 0) {
-            return std::unexpected<std::string>(std::strerror(error));
+            return std::unexpected(std::strerror(error));
         }
-        return std::unexpected<std::string>("");
+        return std::unexpected("");
     }
 
     if (events & EPOLLHUP) {
@@ -158,7 +166,7 @@ std::expected<void, std::string> TcpListenerComponent::handleClientEvent(
                     break;
                 }
 
-                return std::unexpected<std::string>(std::strerror(errno));
+                return std::unexpected(std::strerror(errno));
             }
 
             if (read_size == 0) {
@@ -168,12 +176,18 @@ std::expected<void, std::string> TcpListenerComponent::handleClientEvent(
             std::string message(buffer, static_cast<size_t>(read_size));
             std::string response = m_command_processor.process(message);
 
-            ssize_t sent =
-                send(fd, response.c_str(), response.size(), MSG_NOSIGNAL);
-            if (sent < 0) {
-                if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                    return std::unexpected<std::string>(std::strerror(errno));
+            size_t total_send = 0;
+            while (total_send < response.size()) {
+                ssize_t send_count =
+                    send(fd, response.c_str() + total_send,
+                         response.size() - total_send, MSG_NOSIGNAL);
+                if (send_count < 0) {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        break;
+                    }
+                    return std::unexpected(std::strerror(errno));
                 }
+                total_send += static_cast<size_t>(send_count);
             }
         }
     }
@@ -183,9 +197,9 @@ std::expected<void, std::string> TcpListenerComponent::handleClientEvent(
 }
 
 void TcpListenerComponent::closeClient(int fd) {
+    m_clients.erase(fd);
     [[maybe_unused]] auto _ = m_event_loop.RemoveFd(fd);
     close(fd);
-    m_clients.erase(fd);
     m_stats.decrement_current();
 }
 

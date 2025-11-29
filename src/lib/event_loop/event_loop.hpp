@@ -52,6 +52,7 @@ class EventLoop : public ComponentBase {
 
    private:
     int m_epoll_fd;
+    int m_wakeup_fd;
     std::atomic<bool> m_running;
     std::unordered_map<int, EventCallback> m_callbacks;
     ComponentHealth m_health;

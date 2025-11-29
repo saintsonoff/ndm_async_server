@@ -46,6 +46,7 @@ class TcpListenerComponent : public ComponentBase {
     ComponentHealth m_health;
 
     static constexpr size_t kBufferSize = 4096;
+    static constexpr size_t kMaxClients = 10000;
 };
 
 }  // namespace async_server

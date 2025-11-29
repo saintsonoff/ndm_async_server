@@ -19,7 +19,7 @@ bool ComponentManager::AddComponent(std::unique_ptr<ComponentBase> component) {
         return false;
     }
 
-    if (m_running.load(std::memory_order::acquire)) {
+    if (m_running.load(std::memory_order_acquire)) {
         return false;
     }
 
@@ -35,7 +35,7 @@ std::expected<void, std::string> ComponentManager::Start() {
 
     if (ComponentHealth component_health = m_event_loop.GetComponentHealth();
         component_health != ComponentHealth::kOk) {
-        return std::unexpected<std::string>(
+        return std::unexpected(
             std::string(ComponentHealthToString(component_health)));
     }
 
@@ -46,7 +46,7 @@ std::expected<void, std::string> ComponentManager::Start() {
 
         if (ComponentHealth component_health = component->GetComponentHealth();
             component_health != ComponentHealth::kOk) {
-            return std::unexpected<std::string>(
+            return std::unexpected(
                 std::string(ComponentHealthToString(component_health)));
         }
     }

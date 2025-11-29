@@ -37,10 +37,11 @@ std::string CommandProcessor::process(const std::string& message) {
 
 std::string CommandProcessor::get_time() const {
     time_t now = std::time(nullptr);
-    tm* local = std::localtime(&now);
+    tm local{};
+    localtime_r(&now, &local);
 
     std::ostringstream oss;
-    oss << std::put_time(local, "%Y-%m-%d %H:%M:%S");
+    oss << std::put_time(&local, "%Y-%m-%d %H:%M:%S");
     return oss.str();
 }
 

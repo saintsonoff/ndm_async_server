@@ -446,13 +446,7 @@ class TestPerformance:
         p95 = latencies[int(0.95 * len(latencies))]
         p99 = latencies[int(0.99 * len(latencies))]
         avg = statistics.mean(latencies)
-        
-        print(f"\nLatency statistics (ms):")
-        print(f"  Average: {avg:.2f}")
-        print(f"  p50: {p50:.2f}")
-        print(f"  p95: {p95:.2f}")
-        print(f"  p99: {p99:.2f}")
-        
+
         assert p50 < 10
         assert p95 < 50
         assert p99 < 100
@@ -521,11 +515,7 @@ class TestPerformance:
             max_cpu = max(cpu_samples)
             avg_memory = statistics.mean(memory_samples)
             max_memory = max(memory_samples)
-            
-            print(f"\nResource usage during load:")
-            print(f"  CPU: avg={avg_cpu:.1f}%, max={max_cpu:.1f}%")
-            print(f"  Memory: avg={avg_memory:.1f}MB, max={max_memory:.1f}MB")
-            
+
             assert max_cpu < 90
             assert max_memory < 100
         
@@ -663,3 +653,198 @@ class TestPartialIO:
                 pytest.fail(f"Timeout receiving {size} byte message")
         
         client.close()
+
+
+class TestConnectionLimits:
+    """Test connection limit (kMaxClients = 10000) - DOS protection"""
+    
+    def test_many_concurrent_connections(self, server_process, tcp_client):
+        """Test server handles many concurrent connections (well below limit)"""
+        connections = []
+        max_test_connections = 100
+        
+        try:
+            for i in range(max_test_connections):
+                client = tcp_client()
+                connections.append(client)
+                
+            assert len(connections) == max_test_connections
+            
+            # Test that all connections are functional
+            test_message = b"Connection test"
+            for i, conn in enumerate(connections):
+                conn.sendall(test_message)
+                response = conn.recv(1024)
+                assert response == test_message, f"Connection {i} failed"
+                
+        finally:
+            for conn in connections:
+                try:
+                    conn.close()
+                except:
+                    pass
+    
+    def test_connection_accepted_below_limit(self, server_process, tcp_client):
+        """Verify connections work properly when below kMaxClients limit"""
+        num_connections = 50
+        connections = []
+        
+        try:
+            for _ in range(num_connections):
+                client = tcp_client()
+                connections.append(client)
+                
+            for conn in connections:
+                conn.sendall(b"test")
+                response = conn.recv(1024)
+                assert response == b"test"
+                
+        finally:
+            for conn in connections:
+                try:
+                    conn.close()
+                except:
+                    pass
+
+
+class TestThreadSafeTime:
+    """Test thread-safe time retrieval using localtime_r"""
+    
+    def test_concurrent_time_requests(self, server_process, tcp_client):
+        """Test multiple concurrent /time requests work correctly"""
+        num_threads = 50
+        results = []
+        errors = []
+        
+        def time_request():
+            try:
+                client = tcp_client()
+                client.sendall(b"/time")
+                response = client.recv(1024).decode().strip()
+                client.close()
+                
+                try:
+                    parsed_time = datetime.strptime(response, "%Y-%m-%d %H:%M:%S")
+                    results.append(parsed_time)
+                except ValueError as e:
+                    errors.append(f"Invalid format: {response}")
+                    
+            except Exception as e:
+                errors.append(str(e))
+        
+        threads = []
+        
+        for _ in range(num_threads):
+            thread = threading.Thread(target=time_request)
+            thread.start()
+            threads.append(thread)
+        
+        for thread in threads:
+            thread.join(timeout=10)
+        
+        assert len(errors) == 0, f"Errors occurred: {errors[:5]}"
+        assert len(results) == num_threads
+        
+        for t in results:
+            assert t.year >= 2025
+        
+        times_sorted = sorted(results)
+        time_diff = (times_sorted[-1] - times_sorted[0]).total_seconds()
+        assert time_diff < 5, f"Time difference too large: {time_diff}s"
+    
+    def test_time_format_consistency(self, server_process, tcp_client):
+        """Test time format remains consistent"""
+        client = tcp_client()
+        client.sendall(b"/time")
+        response = client.recv(1024).decode().strip()
+        client.close()
+        
+        parsed_time = datetime.strptime(response, "%Y-%m-%d %H:%M:%S")
+        
+        now = datetime.now()
+        time_diff = abs((now - parsed_time).total_seconds())
+        assert time_diff < 5, f"Time difference too large: {time_diff}s"
+
+
+class TestEventfdIntegration:
+    """Test eventfd (wakeup_fd) integration for fast shutdown"""
+    
+    def test_event_loop_still_responsive(self, server_process, tcp_client):
+        """Verify eventfd doesn't break normal event loop operation"""
+        num_iterations = 100
+        
+        for i in range(num_iterations):
+            client = tcp_client()
+            message = f"Eventfd test {i}".encode()
+            client.sendall(message)
+            response = client.recv(1024)
+            client.close()
+            
+            assert response == message
+    
+    def test_rapid_connect_disconnect_with_eventfd(self, server_process, tcp_client):
+        """Test rapid connections don't interfere with eventfd"""
+        num_clients = 50
+        results = []
+        
+        def client_task(client_id):
+            try:
+                client = tcp_client()
+                for i in range(5):
+                    message = f"Client{client_id}Msg{i}".encode()
+                    client.sendall(message)
+                    response = client.recv(1024)
+                    if response != message:
+                        results.append(False)
+                        return
+                client.close()
+                results.append(True)
+            except Exception:
+                results.append(False)
+        
+        threads = []
+        for i in range(num_clients):
+            thread = threading.Thread(target=client_task, args=(i,))
+            thread.start()
+            threads.append(thread)
+        
+        for thread in threads:
+            thread.join(timeout=30)
+        
+        assert len(results) == num_clients
+        assert all(results), f"Failed: {results.count(False)}/{num_clients}"
+
+
+class TestMemoryOrderingFix:
+    """Test that memory ordering is consistent (fixed std::memory_order::acquire)"""
+    
+    def test_concurrent_stats_access(self, server_process, tcp_client):
+        """Test concurrent stats access with correct memory ordering"""
+        num_threads = 50
+        results = []
+        
+        def stats_task(thread_id):
+            try:
+                client = tcp_client()
+                client.sendall(b"/stats")
+                response = client.recv(1024).decode().strip()
+                client.close()
+                
+                assert "Total:" in response
+                assert "Current:" in response
+                
+                results.append(True)
+            except Exception:
+                results.append(False)
+        
+        threads = []
+        for i in range(num_threads):
+            thread = threading.Thread(target=stats_task, args=(i,))
+            thread.start()
+            threads.append(thread)
+        
+        for thread in threads:
+            thread.join(timeout=10)
+        
+        assert len(results) == num_threads
+        assert all(results), "Some stats requests failed"

@@ -15,8 +15,6 @@
 #include <component_manager/component_manager_builder.hpp>
 #include <config/config.hpp>
 
-#include "component_manager/component_manager.hpp"
-
 int main() {
     async_server::Statistics stats;
     std::atomic<bool> shutdown_flag{false};

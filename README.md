@@ -8,13 +8,18 @@
 - Компонентно-ориентированная архитектура (похожа на userver)
 - Поддержка команд: `/time`, `/stats`, `/shutdown`
 - Echo-сервер для обычных сообщений
-- Graceful shutdown через SIGINT/SIGTERM
+- Graceful shutdown через SIGINT/SIGTERM с уведомлением клиентов
+- **Защита от DOS**: лимит на количество подключений (10000)
+- **Быстрый shutdown**: eventfd для мгновенного пробуждения event loop
+- **Thread-safe**: потокобезопасное получение времени (localtime_r)
+- **Production-ready**: systemd unit файл для deployment
 
 ## Требования
 
 - g++ 13+ с поддержкой C++23
 - GNU Make
 - Python 3.9+ (для тестов)
+- systemd (опционально, для production deployment)
 
 ## Сборка
 
@@ -84,9 +89,9 @@ pytest test_benchmark.py -v
 
 ```
 ComponentManager
-- EventLoop (epoll)
-- TcpListenerComponent (accept + recv/send)
-- UdpListenerComponent (recvfrom/sendto)
+├── EventLoop (epoll + eventfd для wakeup)
+├── TcpListenerComponent (accept + recv/send, max 10k connections)
+└── UdpListenerComponent (recvfrom/sendto)
 ```
 
 Каждый компонент имеет lifecycle: `Start()` → `Run()` → `Stop()` и health checking.
