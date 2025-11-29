@@ -9,10 +9,7 @@
 - Поддержка команд: `/time`, `/stats`, `/shutdown`
 - Echo-сервер для обычных сообщений
 - Graceful shutdown через SIGINT/SIGTERM с уведомлением клиентов
-- **Защита от DOS**: лимит на количество подключений (10000)
 - **Быстрый shutdown**: eventfd для мгновенного пробуждения event loop
-- **Thread-safe**: потокобезопасное получение времени (localtime_r)
-- **Production-ready**: systemd unit файл для deployment
 
 ## Требования
 
