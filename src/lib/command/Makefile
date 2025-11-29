@@ -1,43 +1,41 @@
-# Command library build system
-
-INCLUDE_DIR := $(BUILD_DIR)/include
-LOCAL_INCLUDE_DIR := $(INCLUDE_DIR)/command
-CXXFLAGS := $(CXX_FLAGS) -I$(INCLUDE_DIR)
-LOCAL_OBJS_DIR := $(OBJS_DIR)/lib/command
-LIB_TARGET := $(LIB_DIR)/libcommand.a
+INCLUDE_DIRECTORY := $(BUILD_DIR)/include
+LOCAL_INCLUDE_DIRECTORY := $(INCLUDE_DIRECTORY)/command
+CXXFLAGS := $(CXX_FLAGS) -I$(INCLUDE_DIRECTORY)
+LOCAL_OBJECTS_DIRECTORY := $(OBJS_DIR)/lib/command
+LIBRARY_TARGET := $(LIB_DIR)/libcommand.a
 
 SOURCES := command.cpp
-OBJECTS := $(SOURCES:%.cpp=$(LOCAL_OBJS_DIR)/%.o)
+OBJECTS := $(SOURCES:%.cpp=$(LOCAL_OBJECTS_DIRECTORY)/%.o)
 HEADERS := command.hpp
-INSTALLED_HEADERS := $(HEADERS:%.hpp=$(LOCAL_INCLUDE_DIR)/%.hpp)
+INSTALLED_HEADERS := $(HEADERS:%.hpp=$(LOCAL_INCLUDE_DIRECTORY)/%.hpp)
 
 .PHONY: all clean
 
-all: $(INSTALLED_HEADERS) $(LIB_TARGET)
+all: $(INSTALLED_HEADERS) $(LIBRARY_TARGET)
 
-$(LIB_TARGET): $(OBJECTS) | $(LIB_DIR)
+$(LIBRARY_TARGET): $(OBJECTS) | $(LIB_DIR)
 	@echo "Creating libcommand.a..."
-	ar rcs $@ $^
+	@ar rcs $@ $^
 
-$(LOCAL_OBJS_DIR)/%.o: %.cpp $(HEADERS) | $(LOCAL_OBJS_DIR)
+$(LOCAL_OBJECTS_DIRECTORY)/%.o: %.cpp $(HEADERS) | $(LOCAL_OBJECTS_DIRECTORY)
 	@echo "Compiling command: $<"
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(LOCAL_INCLUDE_DIR)/%.hpp: %.hpp | $(LOCAL_INCLUDE_DIR)
+$(LOCAL_INCLUDE_DIRECTORY)/%.hpp: %.hpp | $(LOCAL_INCLUDE_DIRECTORY)
 	@echo "Installing header: $<"
 	@cp $< $@
 
-$(LOCAL_OBJS_DIR):
-	@mkdir -p $(LOCAL_OBJS_DIR)
+$(LOCAL_OBJECTS_DIRECTORY):
+	@mkdir -p $(LOCAL_OBJECTS_DIRECTORY)
 
 $(LIB_DIR):
 	@mkdir -p $(LIB_DIR)
 
-$(LOCAL_INCLUDE_DIR):
-	@mkdir -p $(LOCAL_INCLUDE_DIR)
+$(LOCAL_INCLUDE_DIRECTORY):
+	@mkdir -p $(LOCAL_INCLUDE_DIRECTORY)
 
 clean:
 	@echo "Cleaning command..."
-	rm -rf $(LOCAL_OBJS_DIR)
-	@if [ -d $(LOCAL_INCLUDE_DIR) ]; then rm -rf $(LOCAL_INCLUDE_DIR); fi
-	rm -f $(LIB_TARGET)
+	@rm -rf $(LOCAL_OBJECTS_DIRECTORY)
+	@if [ -d $(LOCAL_INCLUDE_DIRECTORY) ]; then rm -rf $(LOCAL_INCLUDE_DIRECTORY); fi
+	@rm -f $(LIBRARY_TARGET)

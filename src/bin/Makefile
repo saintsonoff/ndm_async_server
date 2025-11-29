@@ -1,56 +1,44 @@
-# src/bin/Makefile - Binary build system
-# Builds the async_server executable
+EXECUTABLE_NAME := async_server
+INCLUDE_DIRECTORY := $(BUILD_DIR)/include
+CXXFLAGS := $(CXX_FLAGS) -I$(INCLUDE_DIRECTORY)
+LOCAL_OBJECTS_DIRECTORY := $(OBJS_DIR)/bin
+EXECUTABLE_PATH := $(BIN_DIR)/$(EXECUTABLE_NAME)
 
-# Use exported variables from parent Makefile
-# CXX, CXX_FLAGS, BUILD_DIR, OBJS_DIR, LIB_DIR, BIN_DIR are set by parent
+LIBRARIES := $(LIB_DIR)/libcomponent_manager.a \
+             $(LIB_DIR)/libtcp_listener.a \
+             $(LIB_DIR)/libudp_listener.a \
+             $(LIB_DIR)/libevent_loop.a \
+             $(LIB_DIR)/libcommand.a \
+             $(LIB_DIR)/libsocket.a \
+             $(LIB_DIR)/libconfig.a
 
-# Binary-specific settings
-TARGET := async_server
-INCLUDE_DIR := $(BUILD_DIR)/include
-CXXFLAGS := $(CXX_FLAGS) -I$(INCLUDE_DIR)
-LOCAL_OBJS_DIR := $(OBJS_DIR)/bin
-TARGET_PATH := $(BIN_DIR)/$(TARGET)
-
-# Libraries to link against (order matters!)
-LIBS := $(LIB_DIR)/libserver.a \
-        $(LIB_DIR)/libcommand.a \
-        $(LIB_DIR)/libsocket.a \
-        $(LIB_DIR)/libconfig.a
-
-# Source files in this directory
 SOURCES := main.cpp
-OBJECTS := $(SOURCES:%.cpp=$(LOCAL_OBJS_DIR)/%.o)
+OBJECTS := $(SOURCES:%.cpp=$(LOCAL_OBJECTS_DIRECTORY)/%.o)
 
 .PHONY: all clean
 
-# Default target: build the binary
-all: $(TARGET_PATH)
+all: $(EXECUTABLE_PATH)
 
-# Build the executable
-$(TARGET_PATH): $(OBJECTS) $(LIBS) | $(BIN_DIR)
+$(EXECUTABLE_PATH): $(OBJECTS) $(LIBRARIES) | $(BIN_DIR)
 	@echo "Linking executable: $@"
-	$(CXX) $(CXXFLAGS) -o $@ $(OBJECTS) $(LIBS)
-	@echo "Built $(TARGET) successfully!"
+	@$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(OBJECTS) $(LIBRARIES)
+	@echo "Built $(EXECUTABLE_NAME) successfully!"
 
-# Compile source files to object files
-$(LOCAL_OBJS_DIR)/%.o: %.cpp | $(LOCAL_OBJS_DIR)
+$(LOCAL_OBJECTS_DIRECTORY)/%.o: %.cpp | $(LOCAL_OBJECTS_DIRECTORY)
 	@echo "Compiling: $<"
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Create necessary directories
-$(LOCAL_OBJS_DIR):
-	@mkdir -p $(LOCAL_OBJS_DIR)
+$(LOCAL_OBJECTS_DIRECTORY):
+	@mkdir -p $(LOCAL_OBJECTS_DIRECTORY)
 
 $(BIN_DIR):
 	@mkdir -p $(BIN_DIR)
 
-# Ensure libraries are built (this is just a safety check)
 $(LIB_DIR)/%.a:
 	@echo "Library $@ not found, building libraries..."
-	$(MAKE) -C ../lib
+	@$(MAKE) -C ../lib
 
-# Clean this directory's build artifacts
 clean:
 	@echo "Cleaning bin build artifacts..."
-	rm -rf $(LOCAL_OBJS_DIR)
-	rm -f $(TARGET_PATH)
+	@rm -rf $(LOCAL_OBJECTS_DIRECTORY)
+	@rm -f $(EXECUTABLE_PATH)
